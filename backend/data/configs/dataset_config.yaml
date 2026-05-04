@@ -125,9 +125,15 @@ prompts:
 
       Utterance: "{generated_text}"
 
+      Rules:
+      - "measurement_phrase" must be ONLY the measurement category label (e.g. "outer diameter", "thickness", "width", "depth"). Do NOT include values or units in this field.
+      - "value_kind" must be one of: exact, approx, range, tolerance, min_only, max_only, min_max
+      - Use null for any field not present in the utterance
+      - "unit_norm" must be exactly: mm, cm, or in (or null if not present)
+
       Return a JSON object with these fields (use null for missing values):
       {{
-        "measurement_phrase": "<the measurement being described>",
+        "measurement_phrase": "<ONLY the measurement category name, e.g. outer diameter>",
         "value_kind": "<exact|approx|range|tolerance|min_only|max_only|min_max>",
         "value_nominal": <number or null>,
         "value_min": <number or null>,
