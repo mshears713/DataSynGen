@@ -1,0 +1,93 @@
+project:
+  name: test_dataset
+  domain: measurement_extraction
+
+measurement_phrases:
+  - outer diameter
+  - width
+
+units:
+  allowed:
+    - mm
+    - cm
+
+value_kinds:
+  allowed:
+    - exact
+    - range
+    - min_only
+
+models:
+  fast_model:
+    provider: mock
+    model: mock/fast
+    enabled: true
+    notes: "Test model"
+
+  validator_model:
+    provider: mock
+    model: mock/validator
+    enabled: true
+    notes: "Test validator"
+
+prompts:
+  gen_prompt_v1:
+    task: generation
+    title: "Test Generator v1"
+    active: true
+    version: 1
+    template: |
+      Generate utterance for:
+      - Phrase: {measurement_phrase}
+      - Value kind: {value_kind}
+      - Nominal value: {value_nominal}
+      - Min value: {value_min}
+      - Max value: {value_max}
+      - Tolerance: {value_tolerance}
+      - Unit: {unit_norm}
+    notes: "Test prompt"
+
+  val_prompt_v1:
+    task: validation
+    title: "Test Validator v1"
+    active: true
+    version: 1
+    template: |
+      Extract from: "{generated_text}"
+      Return JSON.
+    notes: "Test validation prompt"
+
+profiles:
+  fast_profile:
+    temperature: 0.5
+    max_tokens: 100
+    retry_count: 2
+    timeout: 10
+
+  strict_profile:
+    temperature: 0.1
+    max_tokens: 200
+    retry_count: 1
+    timeout: 15
+
+tasks:
+  generation:
+    model_ref: fast_model
+    prompt_ref: gen_prompt_v1
+    profile_ref: fast_profile
+
+  validation:
+    model_ref: validator_model
+    prompt_ref: val_prompt_v1
+    profile_ref: strict_profile
+
+validation:
+  max_text_length: 500
+  min_text_length: 3
+
+generation:
+  default_batch_size: 5
+  max_retries_on_empty: 1
+
+export:
+  default_format: jsonl
