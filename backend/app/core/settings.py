@@ -1,7 +1,14 @@
+import json
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_CORS = "http://localhost:3000,http://localhost:5173,http://localhost:8080"
+
+# Always load backend/.env (not cwd-relative), so `uvicorn` works from repo root too.
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -10,14 +17,31 @@ class Settings(BaseSettings):
     mock_llm: bool = False
     data_dir: Path = Path("./data")
     log_level: str = "INFO"
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"]
+    # Comma-separated in .env (list[str] would require JSON, which breaks CORS_ORIGINS=a,b)
+    cors_origins: str = _DEFAULT_CORS
+    api_host: str = "0.0.0.0"
+    api_port: int = 8001
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
+
+    @computed_field
+    def cors_origin_list(self) -> list[str]:
+        raw = (self.cors_origins or "").strip()
+        if not raw:
+            return [x.strip() for x in _DEFAULT_CORS.split(",") if x.strip()]
+        if raw.startswith("["):
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, list):
+                return [str(x).strip() for x in data if str(x).strip()]
+        return [x.strip() for x in raw.split(",") if x.strip()]
 
 
 @lru_cache

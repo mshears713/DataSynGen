@@ -144,7 +144,7 @@ def create_app() -> FastAPI:
     # CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -169,4 +169,15 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+    _s = get_settings()
+    print(
+        f"Starting dev server on http://{_s.api_host}:{_s.api_port} "
+        f"(set API_HOST/API_PORT in .env; CORS: {len(_s.cors_origin_list)} origin(s))"
+    )
+    uvicorn.run(
+        "main:app",
+        host=_s.api_host,
+        port=_s.api_port,
+        reload=True,
+    )
