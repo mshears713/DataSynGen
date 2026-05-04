@@ -34,34 +34,34 @@ value_kinds:
 
 models:
   cheap_fast:
-    provider: tokenrouter
-    model: google/gemini-flash
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
     enabled: true
-    notes: "Fast bulk generation candidate. Good for high-volume first-pass generation."
+    notes: "Fast bulk generation. Claude Haiku is efficient and capable."
 
   validator_strict:
-    provider: tokenrouter
-    model: openai/gpt-4.1
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
     enabled: true
-    notes: "Higher accuracy validation candidate. Use for semantic validation."
+    notes: "Validation model. Haiku is capable enough for structured extraction."
 
   creative_mutator:
-    provider: tokenrouter
-    model: anthropic/claude-sonnet
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
     enabled: true
-    notes: "Useful for adversarial phrasing and edge case mutation."
+    notes: "Mutation model for adversarial phrasing."
 
   # Candidate models for future experimentation:
-  # qwen_fast:
-  #   provider: tokenrouter
-  #   model: qwen/qwen2.5-32b
+  # claude_sonnet:
+  #   provider: anthropic
+  #   model: claude-sonnet-4-6
   #   enabled: false
-  #   notes: "Alternative fast generation candidate"
-  # deepseek_cheap:
+  #   notes: "Higher quality generation, more expensive"
+  # tokenrouter_gemini:
   #   provider: tokenrouter
-  #   model: deepseek/deepseek-chat
+  #   model: google/gemini-flash
   #   enabled: false
-  #   notes: "Very cheap option for bulk generation"
+  #   notes: "TokenRouter Gemini Flash (requires api.tokenrouter.ai)"
 
 prompts:
   generator_clean_v1:
@@ -125,9 +125,15 @@ prompts:
 
       Utterance: "{generated_text}"
 
-      Return a JSON object with these fields (use null for missing values):
+      Rules:
+      - "measurement_phrase" must be ONLY the measurement category label (e.g. "outer diameter", "thickness", "width", "depth"). Do NOT include values or units in this field.
+      - "value_kind" must be one of: exact, approx, range, tolerance, min_only, max_only, min_max
+      - Use null for any field not present in the utterance
+      - "unit_norm" must be exactly: mm, cm, or in (or null if not present)
+
+      Return a JSON object with these fields:
       {{
-        "measurement_phrase": "<the measurement being described>",
+        "measurement_phrase": "<ONLY the measurement category name, e.g. outer diameter>",
         "value_kind": "<exact|approx|range|tolerance|min_only|max_only|min_max>",
         "value_nominal": <number or null>,
         "value_min": <number or null>,
@@ -136,7 +142,7 @@ prompts:
         "unit_norm": "<mm|cm|in or null>"
       }}
 
-      Return only the JSON object. No explanation, no markdown.
+      Return only the JSON object. No explanation, no markdown, no code fences.
     notes: "Strict extraction validator. Returns structured JSON for comparison against truth."
 
   mutator_edge_cases_v1:

@@ -14,6 +14,10 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 class Settings(BaseSettings):
     tokenrouter_base_url: str = "https://api.tokenrouter.ai/v1"
     tokenrouter_api_key: str = "mock-key"
+    # Anthropic-native API support (used when ANTHROPIC_API_KEY is set or USE_ANTHROPIC=true)
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com/v1"
+    use_anthropic: bool = False
     mock_llm: bool = False
     data_dir: Path = Path("./data")
     log_level: str = "INFO"

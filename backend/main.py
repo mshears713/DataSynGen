@@ -27,6 +27,7 @@ from app.pipeline.stages import (
     SemanticValidationStage,
 )
 from app.pipeline.text_generator import TextGenerator
+from app.services.anthropic_llm import AnthropicLLMService
 from app.services.mock_llm import MockLLMService
 from app.services.tokenrouter import TokenRouterService
 from app.storage.config_store import ConfigStore
@@ -75,6 +76,14 @@ async def lifespan(app: FastAPI):
     if settings.mock_llm:
         logger.info("Using MockLLMService (MOCK_LLM=true)")
         llm_service = MockLLMService()
+    elif settings.use_anthropic or settings.anthropic_api_key:
+        key = settings.anthropic_api_key or settings.tokenrouter_api_key
+        logger.info(f"Using AnthropicLLMService at {settings.anthropic_base_url}")
+        llm_service = AnthropicLLMService(
+            base_url=settings.anthropic_base_url,
+            api_key=key,
+            config=config,
+        )
     else:
         logger.info(f"Using TokenRouterService at {settings.tokenrouter_base_url}")
         llm_service = TokenRouterService(
