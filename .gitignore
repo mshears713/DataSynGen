@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# DataSynGen runtime data (generated runs, exports, config backups)
+backend/data/runs/
+backend/data/exports/
+backend/data/configs/*.bak
+backend/.env
