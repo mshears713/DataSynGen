@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.core.exceptions import NotFoundError, RunStateError
+from app.core.exceptions import NotFoundError
 from app.models.run import Run, RunAppend, RunConfig, RunCreate, RunStatus
 from app.pipeline.task_registry import task_registry
 
@@ -27,13 +27,48 @@ def _pipeline_runner(request: Request):
     return request.app.state.pipeline_runner
 
 
+def _to_ui_run(run: Run) -> dict:
+    """Convert backend Run to the camelCase shape expected by the frontend."""
+    rc = run.run_config
+    status_map = {
+        RunStatus.created: "queued",
+        RunStatus.running: "running",
+        RunStatus.paused: "paused",
+        RunStatus.completed: "completed",
+        RunStatus.failed: "failed",
+        RunStatus.cancelled: "failed",
+    }
+    prompts = list(dict.fromkeys(filter(None, [
+        rc.generation_prompt_ref,
+        rc.validation_prompt_ref,
+    ])))
+    return {
+        "id": run.run_id,
+        "status": status_map.get(run.status, run.status.value),
+        "createdAt": run.created_at.isoformat(),
+        "updatedAt": run.updated_at.isoformat(),
+        "targetCount": run.target_count,
+        "attempted": run.samples_attempted,
+        "valid": run.samples_valid,
+        "failed": run.samples_failed,
+        "generationModel": rc.generation_model_ref,
+        "validationModel": rc.validation_model_ref,
+        "prompts": prompts,
+        "estCostUsd": run.cost_usd_total,
+        "configSnapshot": f"cfg_{run.run_id[-6:]}",
+        "profile": rc.generation_profile_ref,
+        "currentStage": None,
+        "name": run.name,
+        "notes": run.notes,
+    }
+
+
 @router.post("", status_code=201)
 async def create_run(body: RunCreate, request: Request) -> dict:
     rs = _run_store(request)
     cs = _config_store(request)
     config = cs.get()
 
-    # Resolve model/prompt/profile refs from body or config defaults
     gen_task = config.tasks.get("generation")
     val_task = config.tasks.get("validation")
 
@@ -57,12 +92,10 @@ async def create_run(body: RunCreate, request: Request) -> dict:
     )
 
     rs.save_run(run)
-
-    # Snapshot config into run folder
     rdir = rs.get_run_dir(run_id)
     cs.snapshot_to_run(run_id, rdir)
 
-    return run.model_dump()
+    return _to_ui_run(run)
 
 
 @router.get("")
@@ -70,14 +103,17 @@ async def list_runs(request: Request, status: str | None = None) -> list[dict]:
     rs = _run_store(request)
     runs = rs.load_all_runs()
     if status:
-        try:
-            target_status = RunStatus(status)
-            runs = [r for r in runs if r.status == target_status]
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
-    # Most recent first
+        frontend_to_backend = {
+            "queued": ["created"],
+            "running": ["running"],
+            "paused": ["paused"],
+            "completed": ["completed"],
+            "failed": ["failed", "cancelled"],
+        }
+        backend_statuses = frontend_to_backend.get(status, [status])
+        runs = [r for r in runs if r.status.value in backend_statuses]
     runs.sort(key=lambda r: r.created_at, reverse=True)
-    return [r.model_dump() for r in runs]
+    return [_to_ui_run(r) for r in runs]
 
 
 @router.get("/{run_id}")
@@ -87,7 +123,7 @@ async def get_run(run_id: str, request: Request) -> dict:
         run = rs.load_run(run_id)
     except NotFoundError:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
-    result = run.model_dump()
+    result = _to_ui_run(run)
     result["is_running"] = task_registry.is_running(run_id)
     return result
 
@@ -138,7 +174,7 @@ async def pause_run(run_id: str, request: Request) -> dict:
             detail=f"Run is in state '{run.status}' and cannot be paused",
         )
 
-    signalled = task_registry.signal_pause(run_id)
+    task_registry.signal_pause(run_id)
     return {
         "run_id": run_id,
         "status": "pause_requested",
@@ -163,7 +199,6 @@ async def resume_run(run_id: str, request: Request) -> dict:
     if task_registry.is_running(run_id):
         raise HTTPException(status_code=409, detail="Run is already executing")
 
-    # Clear pause event and create fresh cancel if needed
     task_registry.clear_pause(run_id)
     pause_event, cancel_event = task_registry.create_events(run_id)
     runner = _pipeline_runner(request)
@@ -197,7 +232,6 @@ async def cancel_run(run_id: str, request: Request) -> dict:
     if task_registry.is_running(run_id):
         task_registry.signal_cancel(run_id)
     else:
-        # Not running (was paused), update status directly
         run.status = RunStatus.cancelled
         run.updated_at = datetime.utcnow()
         rs.save_run(run)
@@ -227,7 +261,6 @@ async def append_to_run(run_id: str, body: RunAppend, request: Request) -> dict:
     run.updated_at = datetime.utcnow()
     rs.save_run(run)
 
-    # Start the runner
     pause_event, cancel_event = task_registry.create_events(run_id)
     runner = _pipeline_runner(request)
     run.status = RunStatus.running
@@ -253,7 +286,6 @@ async def get_run_metrics(run_id: str, request: Request) -> dict:
         rs.load_run(run_id)
     except NotFoundError:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
-
     tracker = request.app.state.metrics_tracker
     metrics = tracker.compute_run_metrics(run_id)
     return metrics.model_dump()
@@ -268,6 +300,5 @@ async def get_run_events(
         rs.load_run(run_id)
     except NotFoundError:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
-
     events = rs.load_events(run_id, limit=limit)
     return [e.model_dump() for e in events]

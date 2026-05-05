@@ -13,6 +13,7 @@ from app.api import health as health_router
 from app.api import metrics as metrics_router
 from app.api import runs as runs_router
 from app.api import samples as samples_router
+from app.api import benchmarks as benchmarks_router
 from app.core.exceptions import AppError, app_error_handler
 from app.core.logging_config import configure_logging, get_logger
 from app.core.settings import get_settings
@@ -157,9 +158,11 @@ def create_app() -> FastAPI:
     app.include_router(health_router.router)
     app.include_router(config_router.router)
     app.include_router(runs_router.router)
-    app.include_router(samples_router.router)
+    app.include_router(samples_router.router)       # per-run: /runs/{run_id}/samples
+    app.include_router(samples_router.global_router)  # global: /samples, /failures
     app.include_router(metrics_router.router)
     app.include_router(exports_router.router)
+    app.include_router(benchmarks_router.router)
 
     return app
 

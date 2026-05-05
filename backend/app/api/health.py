@@ -4,7 +4,6 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Request
 
 from app.core.settings import Settings, get_settings
-from app.storage.paths import ensure_storage_dirs
 
 router = APIRouter(tags=["health"])
 
@@ -19,14 +18,19 @@ async def health_check(request: Request, settings: Settings = Depends(get_settin
     ) or settings.mock_llm
 
     storage_writable = _check_storage_writable(settings.data_dir)
+    ts = datetime.utcnow().isoformat()
 
     return {
+        # Fields expected by the frontend ping()
+        "ok": True,
+        "ts": ts,
+        # Additional diagnostic fields
         "status": "ok",
         "config_loaded": config_loaded,
         "tokenrouter_configured": tokenrouter_configured,
         "storage_writable": storage_writable,
         "mock_llm": settings.mock_llm,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": ts,
     }
 
 

@@ -11,6 +11,45 @@ def _get_config_store(request: Request):
     return request.app.state.config_store
 
 
+def _cost_tier(model_id: str) -> str:
+    low = ["flash", "mini", "haiku", "lite", "nano"]
+    high = ["opus", "pro", "ultra", "large", "plus"]
+    ml = model_id.lower()
+    if any(k in ml for k in low):
+        return "low"
+    if any(k in ml for k in high):
+        return "high"
+    return "medium"
+
+
+def _infer_tasks_for_model(ref: str, config: AppConfig) -> list[str]:
+    tasks = []
+    for task_name, route in config.tasks.items():
+        if route.model_ref == ref:
+            tasks.append(task_name)
+    return tasks if tasks else ["generation"]
+
+
+def _strictness_from_temperature(temp: float) -> str:
+    if temp <= 0.2:
+        return "high"
+    if temp <= 0.7:
+        return "medium"
+    return "low"
+
+
+def _diversity_from_temperature(temp: float) -> str:
+    if temp <= 0.2:
+        return "low"
+    if temp <= 0.7:
+        return "medium"
+    return "high"
+
+
+# ---------------------------------------------------------------------------
+# Full config
+# ---------------------------------------------------------------------------
+
 @router.get("", response_model=dict)
 async def get_config(request: Request) -> dict:
     cs = _get_config_store(request)
@@ -48,18 +87,70 @@ async def validate_config(request: Request) -> dict:
         return {"valid": False, "error": e.message, "detail": e.detail}
 
 
+# ---------------------------------------------------------------------------
+# Models — returns ModelDef shape expected by the frontend
+# ---------------------------------------------------------------------------
+
+@router.get("/models")
+async def list_models(request: Request) -> list[dict]:
+    cs = _get_config_store(request)
+    config = cs.get()
+    return [
+        {
+            "id": ref,
+            "displayName": m.model.split("/")[-1].replace("-", " ").title() if "/" in m.model else ref,
+            "modelId": m.model,
+            "provider": m.provider,
+            "notes": m.notes,
+            "enabled": m.enabled,
+            "tasks": _infer_tasks_for_model(ref, config),
+            "costTier": _cost_tier(m.model),
+            "lastUsed": None,
+        }
+        for ref, m in config.models.items()
+    ]
+
+
+@router.patch("/models/{ref}")
+async def update_model(ref: str, request: Request) -> dict:
+    cs = _get_config_store(request)
+    import yaml
+    body = await request.json()
+    raw = cs.get_raw()
+    data = yaml.safe_load(raw)
+    models = data.get("models", {})
+    if ref not in models:
+        raise HTTPException(status_code=404, detail=f"Model '{ref}' not found")
+    allowed_fields = {"enabled", "notes"}
+    for field, val in body.items():
+        if field in allowed_fields:
+            models[ref][field] = val
+    data["models"] = models
+    new_raw = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+    cs.save(new_raw)
+    return {"ref": ref, **models[ref]}
+
+
+# ---------------------------------------------------------------------------
+# Prompts — returns PromptDef shape expected by the frontend
+# ---------------------------------------------------------------------------
+
 @router.get("/prompts")
 async def list_prompts(request: Request) -> list[dict]:
     cs = _get_config_store(request)
     config = cs.get()
     return [
         {
+            "id": ref,
             "ref": ref,
-            "task": p.task,
             "title": p.title,
+            "version": str(p.version),
+            "task": p.task,
             "active": p.active,
-            "version": p.version,
             "notes": p.notes,
+            "lastUsed": None,
+            "body": p.template,
+            "successRate": None,
         }
         for ref, p in config.prompts.items()
     ]
@@ -72,7 +163,18 @@ async def get_prompt(ref: str, request: Request) -> dict:
     if ref not in config.prompts:
         raise HTTPException(status_code=404, detail=f"Prompt '{ref}' not found")
     p = config.prompts[ref]
-    return {"ref": ref, **p.model_dump()}
+    return {
+        "id": ref,
+        "ref": ref,
+        "title": p.title,
+        "version": str(p.version),
+        "task": p.task,
+        "active": p.active,
+        "notes": p.notes,
+        "lastUsed": None,
+        "body": p.template,
+        "successRate": None,
+    }
 
 
 @router.post("/prompts/{ref}/activate")
@@ -84,13 +186,10 @@ async def activate_prompt(ref: str, request: Request) -> dict:
     prompts = data.get("prompts", {})
     if ref not in prompts:
         raise HTTPException(status_code=404, detail=f"Prompt '{ref}' not found")
-
     task = prompts[ref].get("task")
-    # Deactivate all prompts for same task, activate target
     for k, v in prompts.items():
         if v.get("task") == task:
             prompts[k]["active"] = k == ref
-
     data["prompts"] = prompts
     new_raw = yaml.dump(data, allow_unicode=True, default_flow_style=False)
     cs.save(new_raw)
@@ -122,22 +221,17 @@ async def duplicate_prompt(ref: str, request: Request) -> dict:
     prompts = data.get("prompts", {})
     if ref not in prompts:
         raise HTTPException(status_code=404, detail=f"Prompt '{ref}' not found")
-
     source = dict(prompts[ref])
     new_version = source.get("version", 1) + 1
     source["version"] = new_version
     source["active"] = False
     source["title"] = source.get("title", ref) + f" v{new_version}"
-
-    # Generate new ref
     base_ref = ref.rstrip("0123456789").rstrip("_v")
     new_ref = f"{base_ref}_v{new_version}"
-    # Ensure unique
     counter = 1
     while new_ref in prompts:
         new_ref = f"{base_ref}_v{new_version}_{counter}"
         counter += 1
-
     prompts[new_ref] = source
     data["prompts"] = prompts
     new_raw = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -165,34 +259,29 @@ async def update_prompt(ref: str, request: Request) -> dict:
     return {"ref": ref, **prompts[ref]}
 
 
-@router.get("/models")
-async def list_models(request: Request) -> list[dict]:
+# ---------------------------------------------------------------------------
+# Profiles — returns TaskProfile shape expected by the frontend
+# Endpoint: /config/profiles  (alias for task-profiles)
+# ---------------------------------------------------------------------------
+
+@router.get("/profiles")
+async def list_profiles(request: Request) -> list[dict]:
     cs = _get_config_store(request)
     config = cs.get()
     return [
-        {"ref": ref, **m.model_dump()}
-        for ref, m in config.models.items()
+        {
+            "id": ref,
+            "name": ref,
+            "temperature": p.temperature,
+            "maxTokens": p.max_tokens,
+            "retryCount": p.retry_count,
+            "timeoutMs": p.timeout * 1000,
+            "strictness": _strictness_from_temperature(p.temperature),
+            "diversity": _diversity_from_temperature(p.temperature),
+            "notes": "",
+        }
+        for ref, p in config.profiles.items()
     ]
-
-
-@router.patch("/models/{ref}")
-async def update_model(ref: str, request: Request) -> dict:
-    cs = _get_config_store(request)
-    import yaml
-    body = await request.json()
-    raw = cs.get_raw()
-    data = yaml.safe_load(raw)
-    models = data.get("models", {})
-    if ref not in models:
-        raise HTTPException(status_code=404, detail=f"Model '{ref}' not found")
-    allowed_fields = {"enabled", "notes"}
-    for field, val in body.items():
-        if field in allowed_fields:
-            models[ref][field] = val
-    data["models"] = models
-    new_raw = yaml.dump(data, allow_unicode=True, default_flow_style=False)
-    cs.save(new_raw)
-    return {"ref": ref, **models[ref]}
 
 
 @router.get("/task-profiles")
@@ -224,6 +313,10 @@ async def update_task_profile(ref: str, request: Request) -> dict:
     cs.save(new_raw)
     return {"ref": ref, **profiles[ref]}
 
+
+# ---------------------------------------------------------------------------
+# Task routing
+# ---------------------------------------------------------------------------
 
 @router.get("/task-routing")
 async def list_task_routing(request: Request) -> list[dict]:
