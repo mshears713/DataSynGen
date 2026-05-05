@@ -22,6 +22,13 @@ class RunConfig(BaseModel):
     validation_profile_ref: str
 
 
+class RunConstraints(BaseModel):
+    """Optional per-run spec-generation constraints for building targeted dataset slices."""
+    units: list[str] | None = None
+    measurement_phrases: list[str] | None = None
+    value_kinds: list[str] | None = None
+
+
 class Run(BaseModel):
     run_id: str
     name: str | None = None
@@ -37,6 +44,7 @@ class Run(BaseModel):
     completed_at: datetime | None = None
     notes: str = ""
     seed: int = 0
+    constraints: RunConstraints | None = None
 
 
 class RunCreate(BaseModel):
@@ -50,6 +58,7 @@ class RunCreate(BaseModel):
     generation_profile_ref: str | None = None
     validation_profile_ref: str | None = None
     seed: int = 0
+    constraints: RunConstraints | None = None
 
 
 class RunAppend(BaseModel):

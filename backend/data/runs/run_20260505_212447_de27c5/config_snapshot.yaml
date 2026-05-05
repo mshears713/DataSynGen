@@ -1,0 +1,207 @@
+project:
+  name: measurement_dataset_foundry
+  domain: measurement_extraction
+
+measurement_phrases:
+  - outer diameter
+  - inner diameter
+  - overall length
+  - width
+  - height
+  - thickness
+  - depth
+  - hole diameter
+  - slot width
+  - flange thickness
+  - radius
+  - wall thickness
+
+units:
+  allowed:
+    - mm
+    - cm
+    - in
+
+value_kinds:
+  allowed:
+    - exact
+    - approx
+    - range
+    - tolerance
+    - min_only
+    - max_only
+    - min_max
+
+models:
+  cheap_fast:
+    provider: tokenrouter
+    model: google/gemini-flash
+    enabled: true
+    notes: "Fast bulk generation candidate. Good for high-volume first-pass generation."
+
+  validator_strict:
+    provider: tokenrouter
+    model: openai/gpt-4.1
+    enabled: true
+    notes: "Higher accuracy validation candidate. Use for semantic validation."
+
+  creative_mutator:
+    provider: tokenrouter
+    model: anthropic/claude-sonnet
+    enabled: true
+    notes: "Useful for adversarial phrasing and edge case mutation."
+
+  # Candidate models for future experimentation:
+  # qwen_fast:
+  #   provider: tokenrouter
+  #   model: qwen/qwen2.5-32b
+  #   enabled: false
+  #   notes: "Alternative fast generation candidate"
+  # deepseek_cheap:
+  #   provider: tokenrouter
+  #   model: deepseek/deepseek-chat
+  #   enabled: false
+  #   notes: "Very cheap option for bulk generation"
+
+prompts:
+  generator_clean_v1:
+    task: generation
+    title: "Clean Semantic Generator v1"
+    active: true
+    version: 1
+    template: |
+      Generate a single natural-language utterance that expresses the following measurement.
+      The utterance should sound like something a person would say to a measurement device.
+      Do not include any metadata, labels, or JSON. Output only the utterance text.
+
+      Measurement details:
+      - Phrase: {measurement_phrase}
+      - Value kind: {value_kind}
+      - Nominal value: {value_nominal}
+      - Min value: {value_min}
+      - Max value: {value_max}
+      - Tolerance: {value_tolerance}
+      - Unit: {unit_norm}
+
+      Examples of good utterances:
+      - "Outer diameter is sixty five millimeters."
+      - "The width should be between 10 and 15 millimeters."
+      - "Thickness approximately 2.5 centimeters."
+      - "Radius at least 8 mm."
+
+      Output only the utterance. No quotes, no labels, no explanation.
+    notes: "Initial clean semantic generator. Produces natural spoken-style measurements."
+
+  generator_diverse_v1:
+    task: generation
+    title: "Diverse Phrasing Generator v1"
+    active: false
+    version: 1
+    template: |
+      Generate a single natural-language utterance expressing this measurement.
+      Use varied, diverse phrasing. The utterance should be how an engineer or
+      technician might naturally say it - informal, direct, varied in structure.
+      Do not include any metadata. Output only the utterance.
+
+      Measurement:
+      - Phrase: {measurement_phrase}
+      - Value kind: {value_kind}
+      - Nominal value: {value_nominal}
+      - Min value: {value_min}
+      - Max value: {value_max}
+      - Tolerance: {value_tolerance}
+      - Unit: {unit_norm}
+
+      Output only the utterance.
+    notes: "Alternative generator focused on phrasing diversity."
+
+  validator_strict_v1:
+    task: validation
+    title: "Strict Semantic Validator v1"
+    active: true
+    version: 1
+    template: |
+      Extract the measurement information from the following utterance and return it as JSON.
+
+      Utterance: "{generated_text}"
+
+      Return a JSON object with these fields (use null for missing values):
+      {{
+        "measurement_phrase": "<the measurement being described>",
+        "value_kind": "<exact|approx|range|tolerance|min_only|max_only|min_max>",
+        "value_nominal": <number or null>,
+        "value_min": <number or null>,
+        "value_max": <number or null>,
+        "value_tolerance": <number or null>,
+        "unit_norm": "<mm|cm|in or null>"
+      }}
+
+      Return only the JSON object. No explanation, no markdown.
+    notes: "Strict extraction validator. Returns structured JSON for comparison against truth."
+
+  mutator_edge_cases_v1:
+    task: mutation
+    title: "Edge Case Mutator v1"
+    active: false
+    version: 1
+    template: |
+      Rewrite the following utterance to be more challenging or ambiguous while
+      preserving the core measurement information. Create an edge case that would
+      test a measurement extraction system.
+
+      Original: "{generated_text}"
+      Measurement: {measurement_phrase} = {value_nominal} {unit_norm}
+
+      Output only the rewritten utterance.
+    notes: "Generates adversarial edge cases for robustness testing."
+
+profiles:
+  cheap_bulk:
+    temperature: 0.7
+    max_tokens: 120
+    retry_count: 3
+    timeout: 30
+
+  strict_validator:
+    temperature: 0.1
+    max_tokens: 300
+    retry_count: 2
+    timeout: 60
+
+  adversarial:
+    temperature: 1.0
+    max_tokens: 250
+    retry_count: 2
+    timeout: 45
+
+tasks:
+  generation:
+    model_ref: cheap_fast
+    prompt_ref: generator_clean_v1
+    profile_ref: cheap_bulk
+
+  validation:
+    model_ref: validator_strict
+    prompt_ref: validator_strict_v1
+    profile_ref: strict_validator
+
+  mutation:
+    model_ref: creative_mutator
+    prompt_ref: mutator_edge_cases_v1
+    profile_ref: adversarial
+
+  summarization:
+    model_ref: validator_strict
+    prompt_ref: validator_strict_v1
+    profile_ref: strict_validator
+
+validation:
+  max_text_length: 500
+  min_text_length: 5
+
+generation:
+  default_batch_size: 10
+  max_retries_on_empty: 2
+
+export:
+  default_format: jsonl

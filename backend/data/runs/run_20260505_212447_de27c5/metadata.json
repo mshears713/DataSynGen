@@ -1,0 +1,34 @@
+{
+  "run_id": "run_20260505_212447_de27c5",
+  "name": "manual_tokenrouter_auto_fast_1",
+  "status": "completed",
+  "run_config": {
+    "generation_model_ref": "auto:fast",
+    "validation_model_ref": "gpt-4o",
+    "generation_prompt_ref": "generator_clean_v1",
+    "validation_prompt_ref": "validator_strict_v1",
+    "generation_profile_ref": "cheap_bulk",
+    "validation_profile_ref": "strict_validator"
+  },
+  "target_count": 1,
+  "samples_attempted": 1,
+  "samples_valid": 0,
+  "samples_failed": 1,
+  "cost_usd_total": 0.0,
+  "created_at": "2026-05-05T21:24:47.077999",
+  "updated_at": "2026-05-05T21:26:30.324722",
+  "completed_at": "2026-05-05T21:26:30.324655",
+  "notes": "Manual FastAPI smoke test using TokenRouter auto:fast for generation and gpt-4o for validation. [recovered on startup]",
+  "seed": 42,
+  "constraints": {
+    "units": [
+      "mm"
+    ],
+    "measurement_phrases": [
+      "width"
+    ],
+    "value_kinds": [
+      "exact"
+    ]
+  }
+}

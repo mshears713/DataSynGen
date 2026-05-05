@@ -1,0 +1,24 @@
+{
+  "run_id": "run_20260505_222152_944917",
+  "name": "ui_smoke_5_1778019698709",
+  "status": "completed",
+  "run_config": {
+    "generation_model_ref": "cheap_fast",
+    "validation_model_ref": "validator_strict",
+    "generation_prompt_ref": "generator_clean_v1",
+    "validation_prompt_ref": "validator_strict_v1",
+    "generation_profile_ref": "cheap_bulk",
+    "validation_profile_ref": "strict_validator"
+  },
+  "target_count": 30,
+  "samples_attempted": 30,
+  "samples_valid": 30,
+  "samples_failed": 0,
+  "cost_usd_total": 0.0,
+  "created_at": "2026-05-05T22:21:52.234402",
+  "updated_at": "2026-05-05T22:26:49.316377",
+  "completed_at": "2026-05-05T22:26:49.316371",
+  "notes": "Created from frontend UI",
+  "seed": 42,
+  "constraints": null
+}

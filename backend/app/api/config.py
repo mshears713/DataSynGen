@@ -328,6 +328,65 @@ async def list_task_routing(request: Request) -> list[dict]:
     ]
 
 
+@router.get("/domain")
+async def get_domain_config(request: Request) -> dict:
+    cs = _get_config_store(request)
+    config = cs.get()
+    return {
+        "measurement_phrases": config.measurement_phrases,
+        "units": config.units.allowed,
+        "value_kinds": config.value_kinds.allowed,
+    }
+
+
+@router.patch("/domain")
+async def update_domain_config(request: Request) -> dict:
+    cs = _get_config_store(request)
+    import yaml
+    body = await request.json()
+    raw = cs.get_raw()
+    data = yaml.safe_load(raw)
+
+    updated = False
+    if "measurement_phrases" in body:
+        phrases = body["measurement_phrases"]
+        if not isinstance(phrases, list) or len(phrases) == 0:
+            raise HTTPException(status_code=422, detail="measurement_phrases must be a non-empty list")
+        data["measurement_phrases"] = phrases
+        updated = True
+    if "units" in body:
+        units = body["units"]
+        if not isinstance(units, list) or len(units) == 0:
+            raise HTTPException(status_code=422, detail="units must be a non-empty list")
+        if "units" not in data or not isinstance(data["units"], dict):
+            data["units"] = {}
+        data["units"]["allowed"] = units
+        updated = True
+    if "value_kinds" in body:
+        vk = body["value_kinds"]
+        if not isinstance(vk, list) or len(vk) == 0:
+            raise HTTPException(status_code=422, detail="value_kinds must be a non-empty list")
+        if "value_kinds" not in data or not isinstance(data["value_kinds"], dict):
+            data["value_kinds"] = {}
+        data["value_kinds"]["allowed"] = vk
+        updated = True
+
+    if not updated:
+        raise HTTPException(status_code=400, detail="No valid domain fields provided")
+
+    new_raw = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+    try:
+        config = cs.save(new_raw)
+    except ConfigError as e:
+        raise HTTPException(status_code=422, detail={"message": e.message, "detail": e.detail})
+
+    return {
+        "measurement_phrases": config.measurement_phrases,
+        "units": config.units.allowed,
+        "value_kinds": config.value_kinds.allowed,
+    }
+
+
 @router.patch("/task-routing/{task}")
 async def update_task_routing(task: str, request: Request) -> dict:
     cs = _get_config_store(request)

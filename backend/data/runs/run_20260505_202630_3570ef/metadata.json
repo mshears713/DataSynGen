@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260505_202630_3570ef",
+  "name": "real_llm_smoke_5",
+  "status": "completed",
+  "run_config": {
+    "generation_model_ref": "google/gemini-2.5-flash",
+    "validation_model_ref": "openai/gpt-4.1",
+    "generation_prompt_ref": "gen.measurement.v3",
+    "validation_prompt_ref": "val.semantic.v2",
+    "generation_profile_ref": "cheap_bulk",
+    "validation_profile_ref": "strict_validator"
+  },
+  "target_count": 5,
+  "samples_attempted": 5,
+  "samples_valid": 0,
+  "samples_failed": 5,
+  "cost_usd_total": 0.0,
+  "created_at": "2026-05-05T20:26:30.335326",
+  "updated_at": "2026-05-05T20:30:02.437593",
+  "completed_at": "2026-05-05T20:30:02.437506",
+  "notes": "First real LLM end-to-end smoke test from FastAPI docs.",
+  "seed": 42
+}

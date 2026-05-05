@@ -7,13 +7,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import benchmarks as benchmarks_router
 from app.api import config as config_router
+from app.api import debug as debug_router
 from app.api import exports as exports_router
 from app.api import health as health_router
 from app.api import metrics as metrics_router
 from app.api import runs as runs_router
 from app.api import samples as samples_router
-from app.api import benchmarks as benchmarks_router
 from app.core.exceptions import AppError, app_error_handler
 from app.core.logging_config import configure_logging, get_logger
 from app.core.settings import get_settings
@@ -77,11 +78,15 @@ async def lifespan(app: FastAPI):
         logger.info("Using MockLLMService (MOCK_LLM=true)")
         llm_service = MockLLMService()
     else:
-        logger.info(f"Using TokenRouterService at {settings.tokenrouter_base_url}")
+        logger.info(
+            f"Using TokenRouterService at {settings.tokenrouter_base_url} "
+            f"mode={settings.tokenrouter_api_mode}"
+        )
         llm_service = TokenRouterService(
             base_url=settings.tokenrouter_base_url,
             api_key=settings.tokenrouter_api_key,
             config=config,
+            mode=settings.tokenrouter_api_mode,
         )
 
     # Validators
@@ -120,6 +125,7 @@ async def lifespan(app: FastAPI):
     app.state.sample_store = sample_store
     app.state.export_store = export_store
     app.state.llm_service = llm_service
+    app.state.semantic_validator = semantic_validator
     app.state.pipeline_runner = pipeline_runner
     app.state.metrics_tracker = metrics_tracker
     app.state.exporter = exporter
@@ -163,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(metrics_router.router)
     app.include_router(exports_router.router)
     app.include_router(benchmarks_router.router)
+    app.include_router(debug_router.router)
 
     return app
 
