@@ -42,13 +42,27 @@ class PipelineRunner:
         cancel_event: asyncio.Event,
     ) -> None:
         run_id = run.run_id
-        logger.info(f"Pipeline starting: run_id={run_id} target={run.target_count}")
+        c = run.constraints
+        logger.info(
+            f"Pipeline starting: run_id={run_id} target={run.target_count} "
+            f"seed={run.seed} constraints={c.model_dump() if c else None}"
+        )
 
-        self._emit_event(run_id, "run_started", f"Pipeline started with target={run.target_count}")
+        self._emit_event(run_id, "run_started", f"Pipeline started with target={run.target_count}", {
+            "target_count": run.target_count,
+            "seed": run.seed,
+            "constraints": c.model_dump() if c else None,
+        })
 
         try:
-            # Generate the full spec list deterministically
-            specs = self._spec_gen.generate_specs(run.target_count, seed=run.seed)
+            # Generate full spec list deterministically, respecting any constraints
+            specs = self._spec_gen.generate_specs(
+                run.target_count,
+                seed=run.seed,
+                constraint_units=c.units if c else None,
+                constraint_phrases=c.measurement_phrases if c else None,
+                constraint_value_kinds=c.value_kinds if c else None,
+            )
 
             # Load already-processed spec IDs for resumability
             done_ids = self._sample_store.get_processed_spec_ids(run_id)
@@ -82,6 +96,14 @@ class PipelineRunner:
 
                 # Process this spec
                 sample_id = str(uuid4())
+                self._emit_event(run_id, "sample_started", f"Processing spec {spec.spec_id[:8]}", {
+                    "sample_id": sample_id,
+                    "spec_id": spec.spec_id,
+                    "measurement_phrase": spec.measurement_phrase,
+                    "value_kind": spec.value_kind.value,
+                    "unit": spec.unit_norm,
+                })
+
                 ctx = StageContext(
                     spec=spec,
                     run_id=run_id,
@@ -91,7 +113,7 @@ class PipelineRunner:
 
                 ctx, is_valid = await self._executor.process_spec(ctx)
 
-                # Build and store sample
+                # Build and store sample + optional failure
                 sample, failure = self._build_results(ctx, is_valid)
                 self._sample_store.append_sample(sample)
                 if failure:
@@ -109,15 +131,28 @@ class PipelineRunner:
                 run.updated_at = datetime.utcnow()
                 self._run_store.save_run(run)
 
-                status_str = "valid" if is_valid else f"failed({ctx.failure_category})"
-                self._emit_event(
-                    run_id,
-                    "sample_completed",
-                    f"Sample {sample_id[:8]} {status_str}",
-                    {"sample_id": sample_id, "valid": is_valid},
-                )
+                if is_valid:
+                    self._emit_event(
+                        run_id, "sample_completed",
+                        f"Sample {sample_id[:8]} valid",
+                        {"sample_id": sample_id, "spec_id": spec.spec_id, "valid": True},
+                    )
+                else:
+                    cat = ctx.failure_category.value if ctx.failure_category else "unknown"
+                    self._emit_event(
+                        run_id, "sample_failed",
+                        f"Sample {sample_id[:8]} failed: {cat}",
+                        {
+                            "sample_id": sample_id,
+                            "spec_id": spec.spec_id,
+                            "valid": False,
+                            "failure_category": cat,
+                            "failure_details": ctx.failure_details[:300] if ctx.failure_details else "",
+                            "raw_error": ctx.raw_error[:300] if ctx.raw_error else None,
+                        },
+                    )
 
-                # Small yield to allow other coroutines to run
+                # Yield to event loop between samples
                 await asyncio.sleep(0)
 
             # All specs processed
@@ -127,9 +162,9 @@ class PipelineRunner:
             run.updated_at = datetime.utcnow()
             self._run_store.save_run(run)
             self._emit_event(
-                run_id,
-                "run_completed",
+                run_id, "run_completed",
                 f"Run completed: {run.samples_valid} valid, {run.samples_failed} failed",
+                {"samples_valid": run.samples_valid, "samples_failed": run.samples_failed},
             )
             logger.info(f"Pipeline completed: run_id={run_id}")
 
@@ -140,7 +175,9 @@ class PipelineRunner:
                 run.status = RunStatus.failed
                 run.updated_at = datetime.utcnow()
                 self._run_store.save_run(run)
-                self._emit_event(run_id, "run_failed", f"Pipeline error: {e}")
+                self._emit_event(run_id, "run_failed", f"Pipeline error: {e}", {
+                    "error": str(e)[:300],
+                })
             except Exception:
                 pass
 
@@ -153,7 +190,6 @@ class PipelineRunner:
         schema_result = ctx.schema_result or ValidationResult(passed=True)
         semantic_result = ctx.semantic_result
 
-        # Use placeholder metadata if generation failed before metadata was set
         if ctx.model_metadata is None:
             from app.models.llm import ModelMetadata
             ctx.model_metadata = ModelMetadata(
@@ -172,6 +208,7 @@ class PipelineRunner:
             spec=ctx.spec,
             generated_text=ctx.generated_text or "",
             raw_llm_output=ctx.raw_llm_output or "",
+            raw_validator_output=ctx.raw_validator_output,
             status=status,
             schema_validation=schema_result,
             semantic_validation=semantic_result,
@@ -190,6 +227,7 @@ class PipelineRunner:
                 original_spec=ctx.spec,
                 generated_text=ctx.generated_text,
                 validator_output=ctx.semantic_result.extracted if ctx.semantic_result else None,
+                raw_error=ctx.raw_error,
             )
 
         return sample, failure

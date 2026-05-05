@@ -3,9 +3,6 @@ Stage-based pipeline architecture.
 
 Each stage receives a shared StageContext, performs its work,
 and returns a StageResult indicating what should happen next.
-
-This design allows adding mutation, revalidation, and other stages
-without modifying the pipeline executor or runner.
 """
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
@@ -24,12 +21,14 @@ class StageContext:
     sample_id: str
     config: AppConfig
     generated_text: str | None = None
-    raw_llm_output: str | None = None
+    raw_llm_output: str | None = None       # generation LLM raw response
+    raw_validator_output: str | None = None  # validation LLM raw response
     schema_result: ValidationResult | None = None
     semantic_result: ValidationResult | None = None
     model_metadata: ModelMetadata | None = None
     failure_category: FailureCategory | None = None
     failure_details: str = ""
+    raw_error: str | None = None  # sanitized full error context for the Failure record
     attempt: int = 0
 
 
@@ -58,16 +57,23 @@ class GenerationStage:
                 ctx.spec, ctx.run_id, ctx.sample_id
             )
         except LLMCallError as e:
+            # Combine message + detail for an actionable failure record
+            details = e.message
+            if e.detail:
+                details = f"{e.message} | {e.detail[:400]}"
+            ctx.raw_error = details
             return StageResult(
                 status="stop_failed",
                 failure_category=FailureCategory.llm_error,
-                failure_details=str(e.detail or e.message),
+                failure_details=details,
             )
         except Exception as e:
+            details = f"{type(e).__name__}: {e}"[:500]
+            ctx.raw_error = details
             return StageResult(
                 status="stop_failed",
                 failure_category=FailureCategory.llm_error,
-                failure_details=str(e),
+                failure_details=details,
             )
 
         ctx.generated_text = text
@@ -96,7 +102,6 @@ class SchemaValidationStage:
 
         if not result.passed:
             errors = result.errors
-            # Classify the failure category
             if any("empty" in e.lower() for e in errors):
                 cat = FailureCategory.empty_output
             elif any("too short" in e.lower() for e in errors):
@@ -126,13 +131,14 @@ class SemanticValidationStage:
         self._validator = semantic_validator
 
     async def run(self, ctx: StageContext) -> StageResult:
-        result, category = await self._validator.validate(
+        result, category, raw_validator_text = await self._validator.validate(
             spec=ctx.spec,
             generated_text=ctx.generated_text or "",
             run_id=ctx.run_id,
             sample_id=ctx.sample_id,
         )
         ctx.semantic_result = result
+        ctx.raw_validator_output = raw_validator_text
 
         if not result.passed:
             return StageResult(

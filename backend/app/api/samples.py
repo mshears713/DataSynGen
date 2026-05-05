@@ -94,6 +94,13 @@ def _sample_to_ui(sample: Sample) -> dict:
     else:
         validator_notes = "ok"
 
+    # Field-level comparisons from semantic validation
+    field_comparisons: list[dict] = []
+    raw_extraction: dict | None = None
+    if sem_out and sem_out.extracted:
+        field_comparisons = sem_out.extracted.get("field_comparisons", [])
+        raw_extraction = sem_out.extracted.get("raw_extraction")
+
     return {
         "id": sample.sample_id,
         "runId": sample.run_id,
@@ -110,7 +117,12 @@ def _sample_to_ui(sample: Sample) -> dict:
             "schemaValid": sample.schema_validation.passed,
             "semanticMatch": sem_out.passed if sem_out else False,
             "notes": validator_notes,
+            "fieldComparisons": field_comparisons,
+            "rawExtraction": raw_extraction,
         },
+        "rawGenerationOutput": sample.raw_llm_output,
+        "rawValidatorOutput": sample.raw_validator_output,
+        # Keep legacy key for any clients that read it
         "rawModelOutput": sample.raw_llm_output,
         "model": meta.model_name or meta.model_ref,
         "promptVersion": meta.prompt_ref,

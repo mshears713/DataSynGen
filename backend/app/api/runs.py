@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request
 
 from app.core.exceptions import NotFoundError
-from app.models.run import Run, RunAppend, RunConfig, RunCreate, RunStatus
+from app.models.run import Run, RunAppend, RunConfig, RunConstraints, RunCreate, RunStatus
 from app.pipeline.task_registry import task_registry
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -60,7 +60,42 @@ def _to_ui_run(run: Run) -> dict:
         "currentStage": None,
         "name": run.name,
         "notes": run.notes,
+        "seed": run.seed,
+        "constraints": run.constraints.model_dump() if run.constraints else None,
     }
+
+
+def _validate_constraints(constraints: RunConstraints, config) -> None:
+    """Raise HTTPException 422 if any constraint values are not in the active config."""
+    if constraints.units:
+        allowed = set(config.units.allowed)
+        invalid = [u for u in constraints.units if u not in allowed]
+        if invalid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid constraint units {invalid}. Allowed by config: {config.units.allowed}",
+            )
+
+    if constraints.measurement_phrases:
+        allowed = set(config.measurement_phrases)
+        invalid = [p for p in constraints.measurement_phrases if p not in allowed]
+        if invalid:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Invalid constraint measurement_phrases {invalid}. "
+                    f"Allowed by config: {config.measurement_phrases}"
+                ),
+            )
+
+    if constraints.value_kinds:
+        allowed = set(config.value_kinds.allowed)
+        invalid = [k for k in constraints.value_kinds if k not in allowed]
+        if invalid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid constraint value_kinds {invalid}. Allowed by config: {config.value_kinds.allowed}",
+            )
 
 
 @router.post("", status_code=201)
@@ -68,6 +103,10 @@ async def create_run(body: RunCreate, request: Request) -> dict:
     rs = _run_store(request)
     cs = _config_store(request)
     config = cs.get()
+
+    # Validate constraints against active config
+    if body.constraints:
+        _validate_constraints(body.constraints, config)
 
     gen_task = config.tasks.get("generation")
     val_task = config.tasks.get("validation")
@@ -89,6 +128,7 @@ async def create_run(body: RunCreate, request: Request) -> dict:
         target_count=body.target_count,
         notes=body.notes,
         seed=body.seed,
+        constraints=body.constraints,
     )
 
     rs.save_run(run)
@@ -281,19 +321,56 @@ async def append_to_run(run_id: str, body: RunAppend, request: Request) -> dict:
 
 @router.get("/{run_id}/metrics")
 async def get_run_metrics(run_id: str, request: Request) -> dict:
+    from datetime import datetime as _dt
     rs = _run_store(request)
     try:
-        rs.load_run(run_id)
+        run = rs.load_run(run_id)
     except NotFoundError:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     tracker = request.app.state.metrics_tracker
-    metrics = tracker.compute_run_metrics(run_id)
-    return metrics.model_dump()
+    sample_store = _sample_store(request)
+    m = tracker.compute_run_metrics(run_id)
+    rc = run.run_config
+
+    recent_failures = []
+    for sample in sample_store.stream_all_samples(run_id):
+        if sample.status.value != "valid" and len(recent_failures) < 6:
+            sv = sample.schema_validation
+            sem = sample.semantic_validation
+            if not sv.passed:
+                cat = "schema_invalid"
+            elif sem and not sem.passed:
+                cat = "semantic_mismatch"
+            else:
+                cat = "unknown"
+            recent_failures.append({
+                "sampleId": sample.sample_id,
+                "category": cat,
+                "preview": sample.generated_text[:64],
+            })
+
+    failure_rate = m.samples_failed / m.samples_attempted if m.samples_attempted else 0.0
+    return {
+        "runId": run_id,
+        "stage": "text_generation",
+        "activeModel": rc.validation_model_ref or rc.generation_model_ref,
+        "attempted": m.samples_attempted,
+        "valid": m.samples_valid,
+        "invalid": m.samples_failed,
+        "schemaValidRate": m.schema_valid_rate,
+        "semanticMatchRate": m.semantic_match_rate,
+        "failureRate": failure_rate,
+        "throughputPerMin": 0,
+        "estCostUsd": m.cost_usd_total,
+        "costPerValidUsd": m.cost_per_valid_sample or 0.0,
+        "lastUpdate": _dt.utcnow().isoformat(),
+        "recentFailures": recent_failures,
+    }
 
 
 @router.get("/{run_id}/events")
 async def get_run_events(
-    run_id: str, request: Request, limit: int = 100
+    run_id: str, request: Request, limit: int = 200
 ) -> list[dict]:
     rs = _run_store(request)
     try:

@@ -25,7 +25,8 @@ class Sample(BaseModel):
     spec_id: str
     spec: GenerationSpec
     generated_text: str
-    raw_llm_output: str
+    raw_llm_output: str          # raw generation LLM response
+    raw_validator_output: str | None = None  # raw validator LLM response
     status: SampleStatus
     schema_validation: ValidationResult
     semantic_validation: ValidationResult | None = None

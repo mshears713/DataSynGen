@@ -11,11 +11,31 @@ class SpecGenerator:
     def __init__(self, config: AppConfig):
         self._config = config
 
-    def generate_specs(self, count: int, seed: int = 0) -> list[GenerationSpec]:
+    def generate_specs(
+        self,
+        count: int,
+        seed: int = 0,
+        constraint_units: list[str] | None = None,
+        constraint_phrases: list[str] | None = None,
+        constraint_value_kinds: list[str] | None = None,
+    ) -> list[GenerationSpec]:
+        """Generate a deterministic list of specs.
+
+        If constraint_* args are provided they narrow the sampling pool but
+        determinism is preserved: same seed + same constraints + same count
+        always produces the same spec list.
+        """
         rng = random.Random(seed)
-        phrases = self._config.measurement_phrases
-        kinds = [ValueKind(k) for k in self._config.value_kinds.allowed]
-        units = self._config.units.allowed
+        phrases = constraint_phrases or self._config.measurement_phrases
+        kinds = [ValueKind(k) for k in (constraint_value_kinds or self._config.value_kinds.allowed)]
+        units = constraint_units or self._config.units.allowed
+
+        if not phrases:
+            raise ValueError("No measurement phrases available after applying constraints")
+        if not kinds:
+            raise ValueError("No value kinds available after applying constraints")
+        if not units:
+            raise ValueError("No units available after applying constraints")
 
         specs: list[GenerationSpec] = []
         for i in range(count):

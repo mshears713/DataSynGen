@@ -12,8 +12,9 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
-    tokenrouter_base_url: str = "https://api.tokenrouter.ai/v1"
+    tokenrouter_base_url: str = "https://api.tokenrouter.com/v1"
     tokenrouter_api_key: str = "mock-key"
+    tokenrouter_api_mode: str = "openai_chat"  # openai_chat | native_route | responses
     mock_llm: bool = False
     data_dir: Path = Path("./data")
     log_level: str = "INFO"
